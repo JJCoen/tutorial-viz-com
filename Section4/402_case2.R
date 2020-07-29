@@ -7,7 +7,6 @@ page_height <- 234
 
 my_data <- read_csv("data/402_case2_PKdataset.csv")
 
-
 # Define order for factors
 my_data$TRTACT <- factor(my_data$TRTACT, levels = unique(my_data$TRTACT[order(my_data$DOSE)]))
 my_data$ETHN <- factor(my_data$ETHN)

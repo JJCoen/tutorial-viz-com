@@ -1,0 +1,167 @@
+---
+title: "Exploratory exposure-response analysis"
+subtitle: "The importance of understanding the scientific context"
+author: 'Author: Marc Vandemeulebroecke et al'
+date:  "`r format(Sys.Date(), '%A, %B %d, %Y') `"
+output: html_document
+---
+
+Authors:
+Marc Vandemeulebroecke, Mark Baillie, Alison Margolskee, Baldur Magnusson
+
+```{r initialisation, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(comment = NA)
+
+###################################
+## Libraries 
+###################################
+library('knitr')
+library(tidyverse)
+library(RxODE)
+library(caTools)
+library(rstanarm)
+
+theme_set(theme_gray()) # undo rstan theme setting
+
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(data.table)
+library(grid)
+library(RColorBrewer)
+library(lme4)
+library(emmeans)
+
+
+###################################
+## Path to figure directory
+###################################
+fig_path = 'figures/'
+
+##################################
+## Set default theme             
+##################################
+source('utils/paper_theme.R')
+
+##################################
+## Image size file defaults
+##################################
+d_width <- 116.9
+d_height <- 82.7
+d_dpi <- 1000
+
+##################################
+## Set seed 
+##################################
+set.seed(12)
+```
+
+## Purpose
+To study the effect of an inhaled drug on lung function.
+
+## Exploratory Analysis
+Initial plot lung function (response variable) against plasma concentration of drug (exposure in terms of Area Under Curve).
+
+```{r load-data}
+## Read in data
+my_data <- 
+  read_csv("./data/401_case1_PKPDdataset_ard.csv") %>%
+  filter(CYCLE == 1)
+# glimpse(my_data)
+```
+
+
+```{r common-practice, warning=FALSE}
+
+## Plot response vs exposure
+my_data %>%
+  ggplot(aes(x = AUC, y = sCHG)) + 
+  geom_point() + 
+  scale_y_continuous(breaks = seq(-800, 800, 200)) +  
+  theme_gray(base_size = 10) +
+  labs(x = "RESN", y = "LIDV", title = "", caption = "Figure 1")
+```
+
+## Problems with this plot
++ Exploratory plots often give variable names directly from source data.   
+Better to give more informative description.  
+For this example RESN = AUC0-24h (h*ug/mL) and  
+LIDV = FEV1 change from baseline (mL).  
++ Most points are clustered at low end of x-axis
++ Need better display of gridlines
++ Annotation
++ font size
+
+Figure 2 addresses these issues.  It also includes a LOESS smoother [^1], we see a positive non-linear trend, suggesting a shallow sigmoidal exposure-response relationship.
+
+```{r figure2, warning=FALSE}
+lbr <- scales::trans_breaks("log10", function(x) 10^x)
+llb <- scales::trans_format("log10", scales::math_format(10^.x))
+
+my_data %>%
+  ggplot(aes(x = AUC, y = sCHG)) + 
+  geom_point(alpha = 0.7) + 
+  geom_smooth(method = "loess", colour = "red") +
+  scale_x_log10(breaks = lbr, labels = llb) +     # more appropriate scale
+  scale_y_continuous(breaks = seq(-800, 800, 200)) +
+  annotation_logticks(sides = "b") +              # clearer scale
+  labs(    # informative labels
+    x = expression(paste("AUC0-24h (h*",mu,"g/mL)", sep = "")),
+    y = "FEV1 change from baseline (mL)", 
+        # Title is either a quesion or an answer
+    title = "Exposure is positively associated with response",
+    subtitle = "Loess smoother (95% CI)", 
+    caption = "Figure 2"
+    ) +
+  paper_theme()    # clearer grid
+```
+
+At this point, an analyst may focus upon making the graph more appealing.   
+This is an example of [selective attention](https://www.youtube.com/watch?v=vJG698U2Mvo), focusing on the detail but overlooking the higher purpose of the task (i.e. the “why”). Instead, let us now take a step back and revisit this example in the context of the first law of visual communication: have a clear purpose.
+
+## Scientific question of interest
+
+The scientific question of interest is to study the effect of a drug on 
+lung function.  The implicit assumption here is causality.  However, plasma 
+concentration is unlikely to instigate change in lung function.  
+
+Better way to address the scientific question of interest.
+
+Consider the effect of dose amount on both plasma concentration and lung function.
+The expectation is for a positive correlation between dose amount and plasma 
+concentration.  In addition, there would be a range of levels of plasma concentrations for a specific dose.  But what about the effect on lung function?
+
+```{r}
+my_data %>%   # take account of dose by distinguishing the observations
+  ggplot(aes(x = AUC, y = sCHG, colour = factor(DOSE))) + 
+  geom_point(alpha = 0.5) + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  scale_colour_brewer(palette = "Set2" , name = "Dose (mg)") + 
+  scale_x_log10(breaks = lbr, labels = llb) + 
+  scale_y_continuous(breaks = seq(-800, 800, 200)) + 
+  annotation_logticks(sides = "b") +
+  labs(
+    x = expression(paste("AUC0-24h (h*", mu, "g/mL)", sep = "")), 
+    y = "FEV1 change from baseline (mL)", 
+    title = "Exposure is not a better predictor of response than dose",
+    caption = "Figure 3") + 
+  paper_theme() + 
+  theme(
+    legend.position = c("right"),
+    legend.title = element_text(size = 10)
+    )
+```
+
+Visualization of exposure and response within levels of dose. The scatterplot is fundamentally changed by revisiting the question of interest and then applying good graphical principles.
+
+This shows the unexpected result that response decreases for increase in exposure (plasma conc) for a given dose level
+
+In addition, the reason that there seemed to be a positive correlation or non-linear trend is that dose amount influenced both plasma concentration and lung function.  Dose amount is a confounder variable.
+
+
+
+[^1] Robust Locally Weighted Regression and Smoothing Scatterplots. 
+Cleveland, W.S., 1979. Journal of the American Statistical Association, Vol 74(368), pp. 829-836. Taylor & Francis. DOI: 10.1080/01621459.1979.10481038
+
+

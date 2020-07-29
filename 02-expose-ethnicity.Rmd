@@ -1,0 +1,329 @@
+---
+title: "Pharmacokinetic exposure by ethnicity"
+subtitle: "Clarifying the purpose"
+author: 'Author: Marc Vandemeulebroecke et al'
+date:  "`r format(Sys.Date(), '%A, %B %d, %Y') `"
+output: html_document
+---
+
+__Authors:__   
+  Marc Vandemeulebroecke, Mark Baillie, Alison Margolskee, Baldur Magnusson.  
+__Text:__   
+Written by James Coen, augmenting the original study.  
+__Code:__   
+Created by original authors, with additional sections by James Coen.  
+
+```{r initialisation, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning=FALSE)
+knitr::opts_chunk$set(comment = NA)
+
+###################################
+## Libraries 
+###################################
+library('knitr')
+# library(tidyverse)
+library("readr")
+library('dplyr')
+library('magrittr')
+# library(RxODE)
+library(caTools)
+# library(rstanarm)
+
+#theme_set(theme_gray()) 
+
+library('ggplot2')
+library(gridExtra)
+library(data.table)
+library(grid)
+library(RColorBrewer)
+# library(lme4)
+#library(emmeans)
+
+
+###################################
+## Path to figure directory
+###################################
+fig_path = 'figures/'
+
+##################################
+## Set default theme             
+##################################
+source('utils/paper_theme.R')
+
+##################################
+## Image size file defaults
+##################################
+d_width <- 116.9
+d_height <- 82.7
+d_dpi <- 1000
+
+## Page settings
+page_width <- 178
+page_height <- 234
+
+##################################
+## Set seed 
+##################################
+set.seed(12)
+```
+
+## Purpose
+To consider the most appropriate visualisation when comparing drug exposure (in terms of plasma conc) over time in two groups (Caucasian and Japanese).
+
+## Background
+A pharma company develops a drug in a Caucasian population and want to make it available to a different population.  For instance, Japanese regulators require a comparison between the officially-approved population and Japanese patients.  They want to know if exposure is similar or different for both groups. 
+
+The assessment of graphs and fiures is based upon visualisation guidelines[^1]  under three laws criteria:  
+* Law 1: Have a clear purpose.  
+* Law 2: Show the data clearly.  
+* Law 3: Make the message obvious.
+
+## Inspect the data
+```{r load-data, message=FALSE}
+## Read in data
+my_data_raw <- read_csv("data/402_case2_PKdataset.csv") %>%
+  filter(CMT == 2 & DOSE == 300 & PART == 1 & STUDY == 1) %>%
+  mutate(
+    TRTACT = factor(TRTACT),
+    ETHN = factor(ETHN)
+  ) %>% 
+  as.data.table()
+glimpse(my_data_raw)
+
+```
+
+How many patients in the study?
+```{r}
+my_data_raw[, unique(ID)]
+```
+
+What is the meaning of negative time values?
+```{r}
+my_data_raw[is.na(LIDV), NOMTIME]
+```
+
+Dataset contains observations for 30 patients (ID=1:30).  However, there are 60 observations with NA entries for plasma concentration (LIDV) which also have time values less than zero.  Most likely these contain coding information but the details of which are not available.  
+
+Conclusion: remove these rows.
+
+```{r data-cleaning}
+my_data <- my_data_raw[!is.na(LIDV), ]
+rm(my_data_raw)
+```
+
+## Plot mean and error bars (SD) on a linear scale
+The original graph displays mean +/- standard deviations (SD) of the plasma concentration over time, grouped by ethnicity (Caucasian or Japanese).
+```{r mean-exposure, warning=FALSE, error = FALSE}
+my_data %>%
+  ggplot(aes(x = NOMTIME, y = LIDV, group=ETHN )) + 
+      # plot will show two groups for ETHN
+  theme_bw(base_size = 8) +
+  scale_x_continuous(breaks =c(0,4,8,12,24,36,48,72)) +
+    # for each time point, plot means of 30 patients 
+    # split into two groups
+  stat_summary(geom = "line", size = 0.5, fun = mean) + 
+    # draw points as circles with different fill for each group
+  stat_summary(geom = "point", size = 1.5, fun = mean, 
+               aes(fill = ETHN), stroke = 0.5, shape= 21) + 
+    # plot errorbars 
+  stat_summary(geom = "errorbar", width = 2, 
+               fun.data = function(y){
+                 data.frame(
+                   y = mean(y),
+                   ymin = mean(y)-sd(y), 
+                   ymax = mean(y)+sd(y)) } ) + 
+    # change fill for each point (default is green and red)
+  scale_fill_manual(values = c("white", "black")) + 
+  xlab("Time (hours)") + 
+  ylab("Concentration (ng/mL)\nMean (SD)") + 
+  labs(caption = "Figure 1. Pharmacokinetic exposure by ethnicity.") + 
+  theme(plot.caption = element_text(hjust = 0.5, size = 12) ) +
+  theme(legend.title = element_blank(), 
+        legend.position = "bottom",
+        legend.box.spacing = unit(0, "mm")) 
+```
+
+__Law 1. Purpose of the graph__  
+To display the comparison between two population groups that makes differences or similarities apparent.  
+
+Figure 1 suggests that drug exposure in Caucasian and Japanese groups are similar.  However, this needs futher confirmation.
+
+__Law 2. Show the data clearly__  
+Positive attributes of figure 1:  
+1. Labels and symbols are clear.  
+2. Gridlines are supportive and stay in the background.
+3. Graph shows necessary information with no unnecessary adornment.
+
+### Recommendations  
+
+1. In the initial time period after administering the drug, the error bars are long and overlapping making it is difficult to distinguish the two groups.  This is caused by the relatively high standard deviation in concentration levels in the peak absorption phase.  Error bars showing standard error or confidence intervals may be more appropriate:  
+* Standard deviations show the variation in the data; they do not shrink when more data is collected. 
+* Standard errors show the variation in the means. 
+* Confidence intervals may be the best choice as they directly show the uncertainty about the means.
+
+2. In the elimination phase, concentration levels are low making it difficult to determine difference between the groups. Figure 1 shows concentrations on a linear scale.  The histogram of concentration in Figure 2 reveals that most values are at the low end of the scale (less than 60 ng/mL).  In general, concentrations tend to have a logarithmic distribution.  Plotting on a log-linear scale provides a better view of low values during the eliminatin phase.  In contrast, a linear scale displays peak levels more clearly.  
+
+```{r hist, warning=FALSE, error=FALSE}
+ggplot(my_data, aes(x=LIDV)) + 
+  theme_bw(base_size = 8) +
+  geom_histogram(aes(y=..density..), colour="black", fill="white", 
+                 binwidth = 5) +
+  geom_density(alpha=.2, fill="#4B0082")  +
+  scale_x_continuous(breaks=c(seq(0, 300, 20))) + 
+  annotate("text", x = 25, y = 0.035, 
+           label = "low conc", colour = "red") +
+  xlab("Concentration (ng/mL)\nMean (SD)") + 
+  labs(caption = "Figure 2. Distribution of concentration") +
+  theme(plot.caption = element_text(hjust = 0.5, size = 12) ) 
+```
+
+By far the most observations occur at concentration levels between 2.5 and 7.5ng/mL.  This group consists of 30 Caucasian and 23 Japanese patients.
+
+```{r}
+low_conc <-  my_data[inrange(LIDV, 2.5, 7.5), .(ID, ETHN)] 
+data.table(Caucasian = low_conc[ETHN=="Caucasian", .N ],
+           Japanese= low_conc[ETHN=="Japanese", .N] ) %>%
+  kable()
+# clean up
+rm(low_conc)
+```
+
+
+## Confidence interval error bars, log scale on y-axis
+
+```{r confidence-intervals, message=FALSE, warning=FALSE, error=FALSE}
+my_data %>%
+  ggplot(aes(
+    x = NOMTIME,
+    y = LIDV,
+    group = ETHN
+  )) +
+  stat_summary(
+    geom = "errorbar",
+    width = 2,
+    fun.data = mean_cl_normal,
+    fun.args = list(mult = 1)
+  ) +
+  stat_summary(geom = "line", size = 0.5,
+               fun = mean) +
+  stat_summary(
+    aes(fill = ETHN),
+    geom = "point",
+    size = 1.5,
+    fun = mean,
+    stroke = 0.5,
+    shape = 21
+  ) +
+  scale_fill_manual(values = c("white", "black")) +
+  scale_x_continuous(breaks = c(0, 4, 8, 12, 24, 36, 48, 72)) +
+  xlab("Time (h)") + ylab("Concentration (ng/mL)\nMean (95% CI)") +
+  labs(caption = "Figure 3. y-axis log scale and confidence interval error bars") +
+  theme(plot.caption = element_text(hjust = 0.5, size = 12) ) +
+  # guides(color = guide_legend(title = "Dose")) +
+  scale_y_log10() +
+  annotation_logticks(base = 10,
+                      sides = "l",
+                      color = rgb(0.5, 0.5, 0.5)) +
+  theme_bw(base_size = 8) +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "bottom",
+    legend.box.spacing = unit(0, "mm")
+  )
+```
+
+* Less overlap between error bars means that it is easier to compare to two groups.  
+* Difference at low concentration levels is more apparent.  
+* Figure 3 reveals three metrics in order to make a more detailed comparison:
+  + Peak concentration _Cmax_
+  + Elimination/trough concentration _Ctrough_
+  + Overall exposure in terms of area under the curve, _AUC_
+
+While there is similarity at peak, the greater overall exposure may be an issue for Japanese patients.  
+
+__Law 3. Make the message obvious__  
+The message here is what the data shows Caucasian and Japanese patients.  It has revealed three metrics: _Cmax_, Ctrough_ and _AUC_.  According to the Cleveland-McGill ranking[^2], dot plots are among the most effective for comparing numerical values.  Figure 4 compares empirical values for each metric in turn.  
+
+```{r compare-empirical}
+theme_set(theme_bw(base_size = 10))
+
+## Plot cmax, ctrough, AUClast dots (95% CI) in separate panels
+
+Cmax <- my_data %>%
+  filter(!is.na(LIDV))  %>%
+  group_by(ID, ETHN) %>%
+  summarize(Cmax = max(LIDV),
+            Ctrough = min(LIDV))
+
+Ctrough <- my_data %>%
+  filter(!is.na(LIDV))  %>%
+  group_by(ID, ETHN) %>%
+  summarize(Ctrough = min(LIDV))
+
+AUClast <- my_data %>%
+  filter(!is.na(LIDV))
+
+AUClast <-
+  data.frame(stack(sapply(split(AUClast, AUClast$ID), function(df)
+    trapz(df$TIME, df$LIDV))))
+names(AUClast) <- c("AUC", "ID")
+
+AUClast$ID <- as.numeric(as.character(AUClast$ID))
+AUClast <- AUClast[order(AUClast$ID),]
+AUClast <-
+  merge(AUClast, unique(my_data[, c("ID", "ETHN")]), by = "ID")
+
+
+gg1 <- Cmax %>%
+  ggplot(aes(x = ETHN, y = Cmax, group = ETHN)) +
+  stat_summary(fun.data = mean_cl_normal,
+               geom = "errorbar",
+               width = 0) +
+  stat_summary(shape = 21, fill = "white", size = 0.2) +
+  labs(title = "Cmax (ng/mL)", subtitle = "Mean (95% CI)") +
+  scale_y_log10(breaks = c(0.3, 1, 3, 10, 30, 100, 300, 1000, 3000),
+                limits = c(60, 300)) +   annotation_logticks(base = 10,
+                                                             sides = "l",
+                                                             color = rgb(0.5, 0.5, 0.5)) +
+  theme(
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    plot.subtitle = element_text(color = rgb(0.3, 0.3, 0.3))
+  )
+
+gg2 <- gg1 %+% #Cmax %+%
+  aes(x = ETHN, y = Ctrough) +
+  labs(title = "Ctrough (ng/mL)") +
+  scale_y_log10(breaks = c(0.3, 1, 3, 10, 30, 100, 300, 1000, 3000),
+                limits = c(0.6, 9))
+
+
+gg3 <- gg1 %+% AUClast %+% aes(x = ETHN, y = AUC) +
+  labs(title = "AUClast (h.(ng/mL))") +
+  scale_y_log10(breaks = c(0.3, 1, 3, 10, 30, 100, 300, 1000, 3000),
+                limits = c(500, 1500))
+
+figure <- grid.arrange(arrangeGrob(gg1, gg2, gg3, nrow = 1), nrow = 1) 
+annotate_figure(figure, 
+                fig.lab = "Figure 4. Key pharacokinetic metrics",
+                fig.lab.pos = "bottom"
+                )
+
++
+    labs(caption = "Figure 3. y-axis log scale and confidence interval error bars") +
+  theme(plot.caption = element_text(hjust = 0.5, size = 12) ) 
+```
+
+
+
+[^1] Vandemeulebroecke, M et al. Effective Visual Communication for the Quantitative Scientist. _CPT: Pharmacometrics & Systems Pharmacology_ Vol 8, Issue 10 (2019).  Available at
+https://ascpt.onlinelibrary.wiley.com/doi/10.1002/psp4.12455
+
+[^2] Cleveland, W.S. & McGill, R. Graphical perception: theory, experimentation and application to the development of graphical methods. J. Am. Stat. Assoc. 79, 531–554 (1984).
+
+
+Robust Locally Weighted Regression and Smoothing Scatterplots. 
+Cleveland, W.S., 1979. Journal of the American Statistical Association, Vol 74(368), pp. 829-836. Taylor & Francis. DOI: 10.1080/01621459.1979.10481038
+
+
